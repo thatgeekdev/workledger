@@ -1,0 +1,30 @@
+# Node / Frontend
+apps/web/node_modules/
+apps/web/dist/
+apps/web/build/
+
+# PHP / Laravel
+apps/api/vendor/
+apps/api/.env
+apps/api/storage/
+apps/api/bootstrap/cache/
+
+# Composer
+composer.lock
+
+# Docker
+infra/db/data/
+**/docker-compose.override.yml
+**/*.log
+
+# IDEs / OS
+*.DS_Store
+*.vscode/
+*.idea/
+*.swp
+*.swo
+Thumbs.db
+
+# Others
+.env.local
+.env.*.local
