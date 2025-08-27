@@ -1,0 +1,11 @@
+{
+    "name": "workledger/shared",
+    "require": {
+        "php": "^8.2"
+    },
+    "autoload": {
+        "psr-4": {
+            "Workledger\\Shared\\": "psr-4"
+        }
+    }
+}

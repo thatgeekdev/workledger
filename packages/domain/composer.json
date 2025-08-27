@@ -1,0 +1,11 @@
+{
+    "name": "workledger/domain",
+    "require": {
+        "php": "^8.2"
+    },
+    "autoload": {
+        "psr-4": {
+            "Workledger\\Domain\\": "psr-4"
+        }
+    }
+}

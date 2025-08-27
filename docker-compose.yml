@@ -1,0 +1,24 @@
+services:
+  app:
+    build: ./infra/docker/api
+    container_name: workledger_api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./apps/api:/var/www/html
+    depends_on:
+      - db
+
+  db:
+    image: mysql:8
+    container_name: workledger_db
+    restart: always
+    environment:
+      MYSQL_DATABASE: workledger
+      MYSQL_USER: workledger
+      MYSQL_PASSWORD: secret
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./infra/db/data:/var/lib/mysql
