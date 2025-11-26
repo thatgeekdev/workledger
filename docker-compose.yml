@@ -1,24 +1,47 @@
-services:
-  app:
-    build: ./infra/docker/api
-    container_name: workledger_api
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./apps/api:/var/www/html
-    depends_on:
-      - db
+version: "3.9"
 
-  db:
-    image: mysql:8
-    container_name: workledger_db
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: workledger-mysql
     restart: always
     environment:
-      MYSQL_DATABASE: workledger
-      MYSQL_USER: workledger
-      MYSQL_PASSWORD: secret
+      MYSQL_DATABASE: workledger_db
       MYSQL_ROOT_PASSWORD: root
+      MYSQL_USER: workledger
+      MYSQL_PASSWORD: workledger
     ports:
       - "3306:3306"
     volumes:
       - ./infra/db/data:/var/lib/mysql
+
+  redis:
+    image: redis:alpine
+    container_name: workledger-redis
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.api
+    container_name: workledger-api
+    restart: unless-stopped
+    depends_on:
+      - mysql
+      - redis
+    volumes:
+      - ./apps/api:/var/www/html
+    ports:
+      - "8000:8000"
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.web
+    container_name: workledger-web
+    restart: unless-stopped
+    volumes:
+      - ./apps/web:/usr/src/app
+    ports:
+      - "5173:5173"
