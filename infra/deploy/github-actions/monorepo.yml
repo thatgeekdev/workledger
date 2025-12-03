@@ -1,0 +1,76 @@
+name: Monorepo CI
+
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.out.outputs.api }}
+      web: ${{ steps.out.outputs.web }}
+    steps:
+      - uses: actions/checkout@v3
+
+
+      - id: out
+        run: |
+          # detect changed files between branch and main
+          BASE_REF=$(git merge-base HEAD origin/main || echo HEAD)
+          echo "base=$BASE_REF"
+          CHANGED=$(git diff --name-only $BASE_REF..HEAD)
+          echo "$CHANGED"
+
+
+          echo "api=$(echo \"$CHANGED\" | grep -q '^apps/api/' && echo true || echo false)" >> $GITHUB_OUTPUT
+          echo "web=$(echo \"$CHANGED\" | grep -q '^apps/web/' && echo true || echo false)" >> $GITHUB_OUTPUT
+
+
+  api-tests:
+    needs: detect
+    if: needs.detect.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+      php: ["8.2"]
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: mbstring, bcmath, xml, pcntl, pdo_mysql
+      - name: Install composer deps
+        run: |
+          cd apps/api
+          composer install --no-interaction --no-progress --prefer-dist
+      - name: Run tests
+        run: |
+          cd apps/api
+          php artisan test --no-interaction
+
+
+  web-build:
+    needs: detect
+    if: needs.detect.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install & Build
+        run: |
+          cd apps/web
+          npm ci
+          npm run build
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: apps/web/dist

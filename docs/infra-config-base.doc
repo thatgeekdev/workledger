@@ -1,0 +1,350 @@
+# WorkLedger — Arquivos gerados: Dockerfiles, Makefile, CI/CD e helpers
+
+Abaixo estão os arquivos prontos para colar no repositório. Copia/cola para os caminhos indicados. Se quiser, eu ajusto nomes/paths conforme o teu repo.
+
+---
+
+## `docker-compose.yml`
+
+```yaml
+version: '3.9'
+
+services:
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: workledger-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./apps/api:/var/www/html
+      - ./packages:/var/www/packages
+    environment:
+      - APP_ENV=local
+      - APP_DEBUG=true
+    depends_on:
+      - db
+    networks:
+      - workledger
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    container_name: workledger-web
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./apps/web:/app
+    depends_on:
+      - api
+    networks:
+      - workledger
+
+  db:
+    image: mysql:8.0
+    container_name: workledger-db
+    restart: unless-stopped
+    ports:
+      - "3307:3306" # host:container
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: workledger
+      MYSQL_USER: workledger
+      MYSQL_PASSWORD: secret
+    volumes:
+      - ./infra/db/data:/var/lib/mysql
+    networks:
+      - workledger
+
+networks:
+  workledger:
+    driver: bridge
+```
+
+---
+
+## `apps/api/Dockerfile` (Laravel 12 + PHP 8.2)
+
+```dockerfile
+# base image
+FROM php:8.2-fpm
+
+# system deps
+RUN apt-get update && apt-get install -y \
+    git \
+    unzip \
+    libzip-dev \
+    zip \
+    libpng-dev \
+    libonig-dev \
+    libxml2-dev \
+    default-mysql-client \
+    curl \
+  && docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd zip
+
+# composer
+COPY --from=composer:2.6 /usr/bin/composer /usr/bin/composer
+
+# workdir
+WORKDIR /var/www/html
+
+# copy and install
+COPY . /var/www/html
+
+RUN composer install --no-interaction --no-scripts --prefer-dist --no-progress --optimize-autoloader || true
+
+# dev env: ensure storage and cache perms
+RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache || true
+
+# expose port for php artisan serve (we map 8000 -> 8000 in compose)
+EXPOSE 8000
+
+# default command — use artisan serve for dev convenience
+CMD ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8000"]
+```
+
+> Observação: para produção, constrói uma imagem mais segura (nginx + php-fpm) e não uses `artisan serve`.
+
+---
+
+## `apps/web/Dockerfile` (React + Vite)
+
+```dockerfile
+FROM node:20-alpine
+WORKDIR /app
+
+# copy package files first for better caching
+COPY package*.json ./
+COPY pnpm-lock.yaml* yarn.lock* ./
+
+RUN npm ci --silent
+
+COPY . /app
+
+EXPOSE 5173
+CMD ["npm", "run", "dev"]
+```
+
+---
+
+## `apps/api/composer.json` — trechos importantes
+
+> Acrescenta as `repositories` e `autoload` abaixo no `composer.json` do `apps/api`.
+
+```json
+"repositories": [
+  { "type": "path", "url": "../../packages/domain", "options": { "symlink": true } },
+  { "type": "path", "url": "../../packages/shared", "options": { "symlink": true } },
+  { "type": "path", "url": "../../packages/contracts", "options": { "symlink": true } }
+],
+"autoload": {
+  "psr-4": {
+    "App\\": "app/",
+    "WorkLedger\\Domain\\": "../../packages/domain/src/",
+    "WorkLedger\\Shared\\": "../../packages/shared/src/",
+    "WorkLedger\\Contracts\\": "../../packages/contracts/src/"
+  }
+}
+```
+
+Depois de adicionar, executa dentro de `apps/api`:
+
+```bash
+composer update
+composer dump-autoload
+```
+
+---
+
+## `apps/api/app/Providers/PackageServiceProvider.php`
+
+```php
+<?php
+
+namespace App\Providers;
+
+use Illuminate\Support\ServiceProvider;
+
+class PackageServiceProvider extends ServiceProvider
+{
+    public function boot()
+    {
+        // migrations shared
+        $sharedMigrations = base_path('../../packages/shared/database/migrations');
+        if (is_dir($sharedMigrations)) {
+            $this->loadMigrationsFrom($sharedMigrations);
+        }
+
+        // se houver seeders em infra/db ou packages, podes carregar aqui
+    }
+
+    public function register()
+    {
+        // se precisares bind de interfaces para implementações nos packages
+    }
+}
+```
+
+Regista-o em `config/app.php` no array `providers`.
+
+---
+
+## `Makefile` (coloca na raiz do repo)
+
+```makefile
+.PHONY: up down install-api install-web api-migrate api-seed test
+
+up:
+	@docker compose up -d --build
+
+down:
+	@docker compose down
+
+install-api:
+	@cd apps/api && composer install && composer dump-autoload
+
+install-web:
+	@cd apps/web && npm install
+
+api-migrate:
+	@docker compose exec api php artisan migrate --force
+
+api-seed:
+	@docker compose exec api php artisan db:seed --force
+
+test:
+	@cd apps/api && vendor/bin/phpunit
+
+logs:
+	@docker compose logs -f
+```
+
+---
+
+## `infra/deploy/github-actions/monorepo.yml` (GitHub Actions — build seletivo)
+
+```yaml
+name: Monorepo CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.out.outputs.api }}
+      web: ${{ steps.out.outputs.web }}
+    steps:
+      - uses: actions/checkout@v3
+
+      - id: out
+        run: |
+          # detect changed files between branch and main
+          BASE_REF=$(git merge-base HEAD origin/main || echo HEAD)
+          echo "base=$BASE_REF"
+          CHANGED=$(git diff --name-only $BASE_REF..HEAD)
+          echo "$CHANGED"
+
+          echo "api=$(echo \"$CHANGED\" | grep -q '^apps/api/' && echo true || echo false)" >> $GITHUB_OUTPUT
+          echo "web=$(echo \"$CHANGED\" | grep -q '^apps/web/' && echo true || echo false)" >> $GITHUB_OUTPUT
+
+  api-tests:
+    needs: detect
+    if: needs.detect.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: ["8.2"]
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: mbstring, bcmath, xml, pcntl, pdo_mysql
+      - name: Install composer deps
+        run: |
+          cd apps/api
+          composer install --no-interaction --no-progress --prefer-dist
+      - name: Run tests
+        run: |
+          cd apps/api
+          php artisan test --no-interaction
+
+  web-build:
+    needs: detect
+    if: needs.detect.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install & Build
+        run: |
+          cd apps/web
+          npm ci
+          npm run build
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: apps/web/dist
+```
+
+> Nota: se usares GitLab CI eu também posso gerar o `.gitlab-ci.yml` equivalente.
+
+---
+
+## `infra/deploy/push-deploy.sh` (exemplo simples de deploy que a pipeline pode chamar)
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# script que pode ser rodado na runner com acesso ao cluster/prod
+# Exemplo: build + push docker image then deploy
+IMAGE_REPO=${IMAGE_REPO:-example.com/workledger}
+TAG=${GITHUB_SHA:-latest}
+
+# build api image
+cd apps/api
+docker build -t ${IMAGE_REPO}/api:${TAG} .
+
+# push
+docker push ${IMAGE_REPO}/api:${TAG}
+
+# deploy: (exemplo kubectl)
+# kubectl set image deployment/api api=${IMAGE_REPO}/api:${TAG} -n namespace
+
+```
+
+---
+
+## Checklist de coisas que deves validar/ajustar ao colar estes ficheiros
+
+* Verifica `DB_PORT` no `.env` do Laravel — usa `3306` quando ligares ao container `db`.
+* Confirma paths em `composer.json` e estrutura `packages/*/src`.
+* Seeds/migrations: garante que `packages/shared/database/migrations` existe ou ajusta provider.
+* Secrets no GitHub Actions: `IMAGE_REPO`, `DOCKER_USERNAME`, `DOCKER_PASSWORD`, etc.
+* Ajusta `docker-compose.yml` para volumes/perms conforme SO (macOS vs Linux)
+
+---
+
+Se queres, crio também:
+
+* `.gitlab-ci.yml` equivalente
+* Dockerfile de produção (nginx + php-fpm)
+* Script para `composer install` durante build com cache otimizado
+
+Diz qual preferes que eu gere a seguir.
