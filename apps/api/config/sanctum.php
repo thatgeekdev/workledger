@@ -14,19 +14,9 @@ return [
     | and production domains which access your API via a frontend SPA.
     |
     */
-    //     "email": "john@example.com",
-    // "password": "password"
-    // 'stateful' => explode(',', env('SANCTUM_STATEFUL_DOMAINS', 'localhost,127.0.0.1')),
 
-    // 'stateful' => explode(',', env('SANCTUM_STATEFUL_DOMAINS', sprintf(
-    //     '%s%s',
-    //     'localhost,localhost:3000,127.0.0.1,127.0.0.1:8000,::1',
-    //     Sanctum::currentApplicationUrlWithPort(),
-    //     // Sanctum::currentRequestHost(),
-    // ))),
     'stateful' => [
-    '127.0.0.1:5174',
-    'localhost:5174',
+    'localhost:5173',
 ],
 
     /*
