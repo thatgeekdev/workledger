@@ -1,19 +1,31 @@
 <?php
 
-use Illuminate\Http\Request;
+
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\ProfileController;
+use App\Http\Controllers\Api\Admin\UserController;
+use App\Http\Controllers\Api\Admin\RoleController;
 
-/*
-|--------------------------------------------------------------------------
-| API Routes
-|--------------------------------------------------------------------------
-|
-| Here is where you can register API routes for your application. These
-| routes are loaded by the RouteServiceProvider within a group which
-| is assigned the "api" middleware group. Enjoy building your API!
-|
-*/
+Route::prefix('auth')->group(function () {
+    Route::post('register', [AuthController::class,'register']);
+    Route::post('login', [AuthController::class,'login']);
+    Route::post('logout', [AuthController::class,'logout'])->middleware('auth:sanctum');
 
-Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
-    return $request->user();
+    Route::post('forgot-password', [AuthController::class,'forgotPassword']);
+    Route::post('reset-password', [AuthController::class,'resetPassword']);
+
+    Route::get('me', [ProfileController::class,'me'])->middleware('auth:sanctum');
+    Route::put('profile', [ProfileController::class,'update'])->middleware('auth:sanctum');
+});
+
+Route::prefix('admin')->middleware('auth:sanctum')->group(function () {
+    Route::get('users', [UserController::class,'index'])->middleware('can:viewAny,App\Models\User');
+    Route::get('users/{id}', [UserController::class,'show'])->middleware('can:viewAny,App\Models\User');
+    Route::put('users/{id}', [UserController::class,'update'])->middleware('can:viewAny,App\Models\User');
+    Route::put('users/{id}/profile', [UserController::class,'update'])->middleware('can:viewAny,App\Models\User');
+
+    // roles listing for admin UI
+    Route::get('roles', [RoleController::class, 'index']);
+    Route::post('users/{id}/assign-role', [RoleController::class, 'update']);
 });
